@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRANSIT — Live Vehicle Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3a;
+    --accent-bus: #f5a623;
+    --accent-train: #4a9eff;
+    --accent-ferry: #50e3c2;
+    --text: #e8e8f0;
+    --text-muted: #6b6b8a;
+    --green: #39d353;
+    --red: #ff4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 4px;
+    color: var(--text);
+    line-height: 1;
+  }
+  .logo span { color: var(--accent-bus); }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-green 2s infinite;
+    flex-shrink: 0;
+  }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); animation: none; }
+  .status-dot.loading { background: var(--accent-bus); box-shadow: 0 0 8px var(--accent-bus); animation: pulse-amber 1s infinite; }
+
+  @keyframes pulse-green {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  @keyframes pulse-amber {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.3); }
+  }
+
+  .status-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .filter-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .filter-btn:hover { border-color: var(--text-muted); color: var(--text); }
+  .filter-btn.active-bus { border-color: var(--accent-bus); color: var(--accent-bus); background: rgba(245,166,35,0.08); }
+  .filter-btn.active-train { border-color: var(--accent-train); color: var(--accent-train); background: rgba(74,158,255,0.08); }
+  .filter-btn.active-ferry { border-color: var(--accent-ferry); color: var(--accent-ferry); background: rgba(80,227,194,0.08); }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  #refresh-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--accent-bus);
+    background: rgba(245,166,35,0.1);
+    color: var(--accent-bus);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #refresh-btn:hover { background: rgba(245,166,35,0.2); }
+  #refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── MAP ── */
+  #map {
+    flex: 1;
+    position: relative;
+    background: #0d0d1a;
+    overflow: hidden;
+  }
+
+  #map-canvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Map overlay text */
+  .map-overlay {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  /* Vehicle dots on map */
+  .vehicle-dot {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    transition: transform 0.3s ease;
+    z-index: 10;
+  }
+  .vehicle-dot:hover { transform: translate(-50%, -50%) scale(1.5); z-index: 20; }
+  .vehicle-dot.selected { transform: translate(-50%, -50%) scale(1.8); z-index: 30; }
+
+  .vehicle-dot svg { display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8)); }
+
+  .vehicle-label {
+    position: absolute;
+    left: 50%;
+    top: -22px;
+    transform: translateX(-50%);
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    white-space: nowrap;
+    background: rgba(10,10,15,0.9);
+    padding: 2px 5px;
+    border-radius: 3px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .vehicle-dot:hover .vehicle-label,
+  .vehicle-dot.selected .vehicle-label { opacity: 1; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .sidebar-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+
+  .vehicle-count {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 36px;
+    letter-spacing: 2px;
+    line-height: 1;
+  }
+  .vehicle-count span { font-size: 14px; font-family: 'DM Sans', sans-serif; color: var(--text-muted); margin-left: 4px; }
+
+  .count-row {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+  }
+  .count-pill {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* ── SEARCH ── */
+  .search-box {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .search-box input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    outline: none;
+  }
+  .search-box input:focus { border-color: var(--accent-bus); }
+  .search-box input::placeholder { color: var(--text-muted); }
+
+  /* ── VEHICLE LIST ── */
+  .vehicle-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .vehicle-list::-webkit-scrollbar { width: 4px; }
+  .vehicle-list::-webkit-scrollbar-track { background: transparent; }
+  .vehicle-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .vehicle-item {
+    padding: 10px 20px;
+    border-bottom: 1px solid rgba(42,42,58,0.5);
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .vehicle-item:hover { background: var(--surface2); }
+  .vehicle-item.selected { background: rgba(245,166,35,0.06); border-left: 2px solid var(--accent-bus); }
+  .vehicle-item.selected.type-train { background: rgba(74,158,255,0.06); border-left-color: var(--accent-train); }
+  .vehicle-item.selected.type-ferry { background: rgba(80,227,194,0.06); border-left-color: var(--accent-ferry); }
+
+  .vehicle-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .icon-bus { background: rgba(245,166,35,0.15); }
+  .icon-train { background: rgba(74,158,255,0.15); }
+  .icon-ferry { background: rgba(80,227,194,0.15); }
+
+  .vehicle-info { flex: 1; min-width: 0; }
+  .vehicle-route {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .vehicle-headsign {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .vehicle-meta {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .vehicle-speed {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .vehicle-bearing {
+    font-size: 16px;
+    display: inline-block;
+  }
+
+  /* ── DETAIL PANEL ── */
+  .detail-panel {
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    padding: 16px 20px;
+    flex-shrink: 0;
+    display: none;
+  }
+  .detail-panel.visible { display: block; }
+
+  .detail-route {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 24px;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .detail-headsign {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .detail-stat {
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .detail-stat-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 3px;
+  }
+  .detail-stat-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  /* ── EMPTY / ERROR ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    text-align: center;
+    gap: 8px;
+  }
+  .empty-state .big { font-size: 32px; }
+
+  /* ── MAP GRID ── */
+  .map-grid {
+    position: absolute;
+    inset: 0;
+    opacity: 0.03;
+    background-image:
+      linear-gradient(var(--accent-bus) 1px, transparent 1px),
+      linear-gradient(90deg, var(--accent-bus) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* Tooltip */
+  .map-tooltip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    pointer-events: none;
+    z-index: 100;
+    display: none;
+    max-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+  .map-tooltip.visible { display: block; }
+  .map-tooltip-route { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .map-tooltip-row { color: var(--text-muted); margin-top: 2px; }
+
+  /* Bounding box controls */
+  .bbox-controls {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .bbox-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+  .bbox-select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+  }
+  .bbox-select:focus { border-color: var(--accent-bus); }
+  .bbox-select option { background: var(--surface2); }
+
+  /* Scrollbar for list */
+  .no-vehicles {
+    padding: 40px 20px;
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">TRANSIT<span>.</span></div>
+  <div class="status-dot loading" id="status-dot"></div>
+  <div class="status-text" id="status-text">Connecting…</div>
+  <div class="header-right">
+    <button class="filter-btn active-bus" id="filter-bus" onclick="toggleFilter('bus')">
+      <div class="dot" style="background:var(--accent-bus)"></div> BUS
+    </button>
+    <button class="filter-btn active-train" id="filter-train" onclick="toggleFilter('train')">
+      <div class="dot" style="background:var(--accent-train)"></div> TRAIN
+    </button>
+    <button class="filter-btn active-ferry" id="filter-ferry" onclick="toggleFilter('ferry')">
+      <div class="dot" style="background:var(--accent-ferry)"></div> FERRY
+    </button>
+    <button id="refresh-btn" onclick="fetchVehicles()">↺ REFRESH</button>
+  </div>
+</header>
+
+<div class="main">
+  <!-- MAP -->
+  <div id="map">
+    <div class="map-grid"></div>
+    <canvas id="map-canvas"></canvas>
+    <div class="map-overlay" id="map-overlay">
+      No map tiles — using coordinate plot
+    </div>
+    <div class="map-tooltip" id="map-tooltip">
+      <div class="map-tooltip-route" id="tt-route"></div>
+      <div class="map-tooltip-row" id="tt-head"></div>
+      <div class="map-tooltip-row" id="tt-speed"></div>
+      <div class="map-tooltip-row" id="tt-lat"></div>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">Live Vehicles</div>
+      <div class="vehicle-count" id="vehicle-count">0 <span>vehicles</span></div>
+      <div class="count-row">
+        <div class="count-pill"><div class="dot" style="background:var(--accent-bus)"></div> <span id="count-bus">0</span> buses</div>
+        <div class="count-pill"><div class="dot" style="background:var(--accent-train)"></div> <span id="count-train">0</span> trains</div>
+        <div class="count-pill"><div class="dot" style="background:var(--accent-ferry)"></div> <span id="count-ferry">0</span> ferries</div>
+      </div>
+    </div>
+
+    <div class="bbox-controls">
+      <div class="bbox-label">Area</div>
+      <select class="bbox-select" id="area-select" onchange="changeArea()">
+        <option value="perth">Perth, WA</option>
+        <option value="sydney">Sydney, NSW</option>
+        <option value="melbourne">Melbourne, VIC</option>
+        <option value="brisbane">Brisbane, QLD</option>
+        <option value="adelaide">Adelaide, SA</option>
+      </select>
+    </div>
+
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="Search route or destination…" oninput="filterList()">
+    </div>
+
+    <div class="vehicle-list" id="vehicle-list"></div>
+
+    <div class="detail-panel" id="detail-panel">
+      <div class="detail-route" id="detail-route"></div>
+      <div class="detail-headsign" id="detail-headsign"></div>
+      <div class="detail-grid">
+        <div class="detail-stat">
+          <div class="detail-stat-label">Speed</div>
+          <div class="detail-stat-value" id="detail-speed">—</div>
+        </div>
+        <div class="detail-stat">
+          <div class="detail-stat-label">Heading</div>
+          <div class="detail-stat-value" id="detail-bearing">—</div>
+        </div>
+        <div class="detail-stat">
+          <div class="detail-stat-label">Latitude</div>
+          <div class="detail-stat-value" id="detail-lat">—</div>
+        </div>
+        <div class="detail-stat">
+          <div class="detail-stat-label">Longitude</div>
+          <div class="detail-stat-value" id="detail-lon">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const OTP = 'https://otp.anyways.kontour.io/otp/gtfs/v1';
+
+// ── Areas (bounding boxes: minLat, minLon, maxLat, maxLon) ──
+const AREAS = {
+  perth:     { minLat: -32.15, minLon: 115.70, maxLat: -31.70, maxLon: 116.05, label: 'Perth, WA' },
+  sydney:    { minLat: -34.10, minLon: 150.60, maxLat: -33.50, maxLon: 151.40, label: 'Sydney, NSW' },
+  melbourne: { minLat: -38.00, minLon: 144.70, maxLat: -37.60, maxLon: 145.30, label: 'Melbourne, VIC' },
+  brisbane:  { minLat: -27.65, minLon: 152.85, maxLat: -27.25, maxLon: 153.20, label: 'Brisbane, QLD' },
+  adelaide:  { minLat: -35.10, minLon: 138.45, maxLat: -34.70, maxLon: 138.80, label: 'Adelaide, SA' },
+};
+
+let currentArea = 'perth';
+let allVehicles = [];
+let filteredVehicles = [];
+let selectedId = null;
+let filters = { bus: true, train: true, ferry: true };
+let refreshTimer = null;
+
+// ── Canvas map ──
+const canvas = document.getElementById('map-canvas');
+const ctx = canvas.getContext('2d');
+let canvasW = 0, canvasH = 0;
+
+function resizeCanvas() {
+  const map = document.getElementById('map');
+  canvas.width = map.clientWidth;
+  canvas.height = map.clientHeight;
+  canvasW = canvas.width;
+  canvasH = canvas.height;
+  drawMap();
+}
+
+function latLonToXY(lat, lon) {
+  const area = AREAS[currentArea];
+  const x = (lon - area.minLon) / (area.maxLon - area.minLon) * canvasW;
+  const y = (1 - (lat - area.minLat) / (area.maxLat - area.minLat)) * canvasH;
+  return { x, y };
+}
+
+function getColor(type) {
+  if (type === 'BUS') return '#f5a623';
+  if (type === 'RAIL' || type === 'TRAM' || type === 'SUBWAY') return '#4a9eff';
+  if (type === 'FERRY') return '#50e3c2';
+  return '#888';
+}
+
+function drawMap() {
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvasW, canvasH);
+
+  // Draw a subtle grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < canvasW; x += 60) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke();
+  }
+  for (let y = 0; y < canvasH; y += 60) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvasW, y); ctx.stroke();
+  }
+
+  // Draw vehicles
+  filteredVehicles.forEach(v => {
+    if (!v.lat || !v.lon) return;
+    const { x, y } = latLonToXY(v.lat, v.lon);
+    if (x < -10 || x > canvasW + 10 || y < -10 || y > canvasH + 10) return;
+
+    const color = getColor(v.type);
+    const isSelected = v.id === selectedId;
+    const r = isSelected ? 8 : 5;
+
+    // Bearing arrow
+    if (v.bearing !== null && v.bearing !== undefined) {
+      const rad = (v.bearing - 90) * Math.PI / 180;
+      const len = isSelected ? 18 : 12;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rad * 0 + v.bearing * Math.PI / 180);
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = isSelected ? 2 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -len);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Glow
+    if (isSelected) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, r + 6, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.15;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Dot
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = isSelected ? 1 : 0.85;
+    ctx.fill();
+
+    // Inner highlight
+    ctx.beginPath();
+    ctx.arc(x - r * 0.25, y - r * 0.25, r * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.globalAlpha = 0.3;
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+
+    // Route label for selected
+    if (isSelected && v.route) {
+      ctx.font = 'bold 10px "Space Mono", monospace';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      const label = v.route;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(10,10,15,0.85)';
+      ctx.beginPath();
+      ctx.roundRect(x - tw/2 - 4, y - 26, tw + 8, 14, 3);
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.fillText(label, x, y - 15);
+    }
+  });
+
+  // Count overlay
+  document.getElementById('map-overlay').textContent =
+    `${filteredVehicles.length} vehicles · ${AREAS[currentArea].label}`;
+}
+
+// ── Canvas hover ──
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+  let hit = null;
+  let minDist = 20;
+  filteredVehicles.forEach(v => {
+    if (!v.lat || !v.lon) return;
+    const { x, y } = latLonToXY(v.lat, v.lon);
+    const d = Math.hypot(x - mx, y - my);
+    if (d < minDist) { minDist = d; hit = v; }
+  });
+
+  const tt = document.getElementById('map-tooltip');
+  if (hit) {
+    tt.classList.add('visible');
+    tt.style.left = (e.clientX - document.querySelector('#map').getBoundingClientRect().left + 14) + 'px';
+    tt.style.top = (e.clientY - document.querySelector('#map').getBoundingClientRect().top - 10) + 'px';
+    document.getElementById('tt-route').textContent = hit.route || 'Unknown Route';
+    document.getElementById('tt-route').style.color = getColor(hit.type);
+    document.getElementById('tt-head').textContent = '→ ' + (hit.headsign || '—');
+    document.getElementById('tt-speed').textContent = hit.speed ? `${Math.round(hit.speed * 3.6)} km/h` : '';
+    document.getElementById('tt-lat').textContent = `${hit.lat.toFixed(5)}, ${hit.lon.toFixed(5)}`;
+  } else {
+    tt.classList.remove('visible');
+  }
+});
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+  let hit = null;
+  let minDist = 20;
+  filteredVehicles.forEach(v => {
+    if (!v.lat || !v.lon) return;
+    const { x, y } = latLonToXY(v.lat, v.lon);
+    const d = Math.hypot(x - mx, y - my);
+    if (d < minDist) { minDist = d; hit = v; }
+  });
+
+  if (hit) selectVehicle(hit.id);
+});
+
+// ── OTP GraphQL query ──
+async function fetchVehicles() {
+  const btn = document.getElementById('refresh-btn');
+  const dot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+
+  btn.disabled = true;
+  dot.className = 'status-dot loading';
+  statusText.textContent = 'Fetching…';
+
+  const area = AREAS[currentArea];
+
+  // OTP2 GTFS GraphQL — vehiclePositions query
+  const query = `{
+    vehiclePositions(
+      boundingBox: {
+        minLat: ${area.minLat}
+        minLon: ${area.minLon}
+        maxLat: ${area.maxLat}
+        maxLon: ${area.maxLon}
+      }
+    ) {
+      vehicleId
+      lat
+      lon
+      speed
+      heading
+      label
+      trip {
+        gtfsId
+        route {
+          shortName
+          longName
+          mode
+          color
+        }
+        tripHeadsign
+      }
+    }
+  }`;
+
+  try {
+    const res = await fetch(OTP, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (data.errors) {
+      console.warn('GraphQL errors:', data.errors);
+      // Try alternative query if first fails
+      return await fetchVehiclesAlt();
+    }
+
+    const positions = data?.data?.vehiclePositions || [];
+    processVehicles(positions);
+    dot.className = 'status-dot';
+    statusText.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+  } catch (err) {
+    console.error('Fetch failed:', err);
+    // Try alternative approach
+    await fetchVehiclesAlt();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Alternative: query routes then stops (fallback)
+async function fetchVehiclesAlt() {
+  const dot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+
+  // Try a broader OTP query — some OTP instances use different field names
+  const query = `{
+    routes(feeds: []) {
+      gtfsId
+      shortName
+      longName
+      mode
+    }
+  }`;
+
+  try {
+    const res = await fetch(OTP, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    });
+    const data = await res.json();
+
+    if (data?.data?.routes?.length > 0) {
+      // API is reachable but vehiclePositions may not be supported
+      // Generate demo data for illustration based on real routes
+      const routes = data.data.routes.slice(0, 50);
+      const demoVehicles = generateDemoFromRoutes(routes);
+      processVehicles(demoVehicles);
+      dot.className = 'status-dot';
+      statusText.textContent = `Routes loaded · Live positions unavailable`;
+    } else {
+      throw new Error('No data');
+    }
+  } catch (err) {
+    console.error('Alt fetch failed:', err);
+    dot.className = 'status-dot error';
+    statusText.textContent = 'Connection failed';
+    showError();
+  }
+}
+
+function generateDemoFromRoutes(routes) {
+  const area = AREAS[currentArea];
+  return routes.map((r, i) => {
+    const lat = area.minLat + Math.random() * (area.maxLat - area.minLat);
+    const lon = area.minLon + Math.random() * (area.maxLon - area.minLon);
+    return {
+      vehicleId: `demo-${i}`,
+      lat, lon,
+      speed: Math.random() * 20,
+      heading: Math.random() * 360,
+      label: r.shortName,
+      trip: {
+        gtfsId: r.gtfsId,
+        route: r,
+        tripHeadsign: r.longName || 'City'
+      }
+    };
+  });
+}
+
+function processVehicles(positions) {
+  allVehicles = positions.map(p => ({
+    id: p.vehicleId || p.label || Math.random().toString(36).slice(2),
+    lat: p.lat,
+    lon: p.lon,
+    speed: p.speed,
+    bearing: p.heading,
+    route: p.trip?.route?.shortName || p.label || '?',
+    longName: p.trip?.route?.longName || '',
+    headsign: p.trip?.tripHeadsign || '',
+    type: p.trip?.route?.mode || 'BUS',
+    color: p.trip?.route?.color,
+  }));
+
+  updateCounts();
+  applyFilters();
+  renderList();
+  drawMap();
+}
+
+function updateCounts() {
+  const buses = allVehicles.filter(v => v.type === 'BUS').length;
+  const trains = allVehicles.filter(v => ['RAIL','TRAM','SUBWAY'].includes(v.type)).length;
+  const ferries = allVehicles.filter(v => v.type === 'FERRY').length;
+
+  document.getElementById('vehicle-count').innerHTML =
+    `${allVehicles.length} <span>vehicles</span>`;
+  document.getElementById('count-bus').textContent = buses;
+  document.getElementById('count-train').textContent = trains;
+  document.getElementById('count-ferry').textContent = ferries;
+}
+
+function applyFilters() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+
+  filteredVehicles = allVehicles.filter(v => {
+    const typeOk = (v.type === 'BUS' && filters.bus) ||
+      (['RAIL','TRAM','SUBWAY'].includes(v.type) && filters.train) ||
+      (v.type === 'FERRY' && filters.ferry) ||
+      (!['BUS','RAIL','TRAM','SUBWAY','FERRY'].includes(v.type));
+
+    const searchOk = !search ||
+      v.route.toLowerCase().includes(search) ||
+      v.headsign.toLowerCase().includes(search) ||
+      v.longName.toLowerCase().includes(search);
+
+    return typeOk && searchOk;
+  });
+
+  renderList();
+  drawMap();
+}
+
+function filterList() { applyFilters(); }
+
+function toggleFilter(type) {
+  filters[type] = !filters[type];
+  const btn = document.getElementById(`filter-${type}`);
+  if (filters[type]) {
+    btn.className = `filter-btn active-${type}`;
+  } else {
+    btn.className = 'filter-btn';
+  }
+  applyFilters();
+}
+
+function renderList() {
+  const list = document.getElementById('vehicle-list');
+
+  if (filteredVehicles.length === 0) {
+    list.innerHTML = `<div class="no-vehicles">No vehicles found<br><span style="opacity:0.5">Try a different filter or area</span></div>`;
+    return;
+  }
+
+  // Sort by route name
+  const sorted = [...filteredVehicles].sort((a, b) => a.route.localeCompare(b.route, undefined, { numeric: true }));
+
+  list.innerHTML = sorted.map(v => {
+    const isSelected = v.id === selectedId;
+    const icon = v.type === 'BUS' ? '🚌' :
+                 ['RAIL','SUBWAY'].includes(v.type) ? '🚆' :
+                 v.type === 'TRAM' ? '🚊' :
+                 v.type === 'FERRY' ? '⛴️' : '🚌';
+    const iconClass = v.type === 'BUS' ? 'icon-bus' :
+                      ['RAIL','TRAM','SUBWAY'].includes(v.type) ? 'icon-train' :
+                      v.type === 'FERRY' ? 'icon-ferry' : 'icon-bus';
+    const typeClass = v.type === 'BUS' ? 'type-bus' :
+                      ['RAIL','TRAM','SUBWAY'].includes(v.type) ? 'type-train' :
+                      v.type === 'FERRY' ? 'type-ferry' : '';
+    const color = getColor(v.type);
+    const speedKmh = v.speed ? Math.round(v.speed * 3.6) : null;
+
+    return `<div class="vehicle-item ${isSelected ? 'selected' : ''} ${typeClass}"
+      onclick="selectVehicle('${v.id}')">
+      <div class="vehicle-icon ${iconClass}">${icon}</div>
+      <div class="vehicle-info">
+        <div class="vehicle-route" style="color:${color}">Route ${v.route}</div>
+        <div class="vehicle-headsign">${v.headsign || v.longName || 'Unknown'}</div>
+      </div>
+      <div class="vehicle-meta">
+        ${speedKmh !== null ? `<div class="vehicle-speed">${speedKmh}<small style="font-size:8px"> km/h</small></div>` : ''}
+        ${v.bearing !== null && v.bearing !== undefined ? `<div class="vehicle-bearing" style="display:inline-block;transform:rotate(${v.bearing}deg)">↑</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectVehicle(id) {
+  selectedId = selectedId === id ? null : id;
+  const v = allVehicles.find(x => x.id === id);
+
+  if (v && selectedId) {
+    const panel = document.getElementById('detail-panel');
+    panel.classList.add('visible');
+    document.getElementById('detail-route').textContent = `Route ${v.route}`;
+    document.getElementById('detail-route').style.color = getColor(v.type);
+    document.getElementById('detail-headsign').textContent = `→ ${v.headsign || v.longName || '—'}`;
+    document.getElementById('detail-speed').textContent = v.speed ? `${Math.round(v.speed * 3.6)} km/h` : '—';
+    document.getElementById('detail-bearing').textContent = v.bearing !== null && v.bearing !== undefined ? `${Math.round(v.bearing)}°` : '—';
+    document.getElementById('detail-lat').textContent = v.lat ? v.lat.toFixed(5) : '—';
+    document.getElementById('detail-lon').textContent = v.lon ? v.lon.toFixed(5) : '—';
+  } else {
+    document.getElementById('detail-panel').classList.remove('visible');
+  }
+
+  renderList();
+  drawMap();
+
+  // Scroll to vehicle in list
+  setTimeout(() => {
+    const items = document.querySelectorAll('.vehicle-item.selected');
+    items.forEach(el => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+  }, 50);
+}
+
+function showError() {
+  const list = document.getElementById('vehicle-list');
+  list.innerHTML = `<div class="no-vehicles">
+    ⚠️ Could not reach API<br>
+    <span style="opacity:0.5">The OTP server may be region-restricted<br>or require authentication</span>
+  </div>`;
+}
+
+function changeArea() {
+  currentArea = document.getElementById('area-select').value;
+  selectedId = null;
+  document.getElementById('detail-panel').classList.remove('visible');
+  fetchVehicles();
+}
+
+// ── Auto-refresh every 15s ──
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(fetchVehicles, 15000);
+}
+
+// ── Init ──
+window.addEventListener('load', () => {
+  resizeCanvas();
+  fetchVehicles();
+  startAutoRefresh();
+});
+
+window.addEventListener('resize', resizeCanvas);
+</script>
+</body>
+</html>
